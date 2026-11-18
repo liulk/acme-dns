@@ -5,15 +5,18 @@ simplifications.
 
 [acme-dns]: https://github.com/acme-dns/acme-dns
 
-  * Uses golang.org/x/dns/dnsmessage for DNS wire protocol.
+  * Uses [golang.org/x/dns/dnsmessage] for the DNS wire protocol,
+    which is the same code used by golang's builtin DNS resolver.
   * Eschews self-service registration and record persistence, which
     lets us avoid sqlite3 or external databases.  See [Usage](#usage)
     below.
 
+[golang.org/x/dns/dnsmessage]: https://pkg.go.dev/golang.org/x/net/dns/dnsmessage
+
 This eliminates supply chain attacks targeting third-party package
 maintainers.  It currently has about 560 lines.
 
-## Usage {#usage}
+## Usage
 
 Install the latest version:
 
