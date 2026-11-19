@@ -20,8 +20,8 @@ maintainers.  It currently has about 560 lines.
 
 Install the latest version:
 
-```shell-session
-$ go install github.com/liulk/acme-dns@latest
+```sh
+go install github.com/liulk/acme-dns@latest
 ```
 
 The `acme-dns` server accepts the following command line flags:
@@ -65,7 +65,7 @@ LAN.  The REST API does not need to be exposed to the WAN.
 Endpoint registration must be done before attempting an ACME
 challenge.  This can be done using a `POST /register` JSON request.
 
-```shell-session
+```console
 $ curl --json '{}' -o reg.json http://localhost:8000/register
 ```
 
@@ -102,15 +102,17 @@ Some notable differences from [acme-dns]:
 An ACME client will update the endpoint's TXT record using a `POST
 /update` JSON request.
 
-```shell-session
+```console
 $ ENDPOINT_USERNAME=c36f50e8-4632-44f0-83fe-e070fef28a10
 $ ENDPOINT_PASSWORD=htB9mR9DYgcu9bX_afHF62erXaH2TS7bg9KW3F7Z
+
 $ cat <<END > update.json
 {
     "subdomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a",
     "txt": "___validation_token_received_from_the_ca___"
 }
 END
+
 $ curl --json @update.json \
     -H "X-Api-User: ${ENDPOINT_USERNAME}" \
     -H "X-Api-Key: ${ENDPOINT_PASSWORD}" \
@@ -128,7 +130,7 @@ As an extension to [acme-dns], the username and password can go into
 the request JSON as well.  You can make a copy of `reg.json`, add the
 desired `"txt"` field, and use it to update the record.
 
-```shell-session
+```console
 $ cat <<END > update.json
 {
     "subdomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a",
@@ -137,6 +139,7 @@ $ cat <<END > update.json
     "txt": "___validation_token_received_from_the_ca___"
 }
 END
+
 $ curl --json @update.json http://localhost:8000/update
 ```
 
@@ -146,7 +149,7 @@ This implementation further supports multiple TXT string fragments per
 record, which is required by DNS-PERSIST-01.  The fragments go in to
 the `"txts"` field and overrides `"txt"`.
 
-```shell-session
+```console
 $ cat <<END > update.json
 {
     "subdomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a",
@@ -155,6 +158,7 @@ $ cat <<END > update.json
     "txts": ["letsencrypt", " accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/1234567890"]
 }
 END
+
 $ curl --json @update.json http://localhost:8000/update
 ```
 
