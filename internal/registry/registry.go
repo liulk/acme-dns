@@ -26,7 +26,10 @@ func (r *Record) PreferredTXTs() []string {
 	if len(r.TXTs) > 0 {
 		return r.TXTs
 	}
-	return []string{r.TXT}
+	if r.TXT != "" {
+		return []string{r.TXT}
+	}
+	return nil
 }
 
 var b64urle = base64.RawURLEncoding

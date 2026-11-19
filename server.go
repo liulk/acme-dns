@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/liulk/acme-dns/internal/registry"
@@ -27,6 +28,8 @@ import (
 type serverConfig struct {
 	domain      string
 	registryDir string
+	dnsSecKSK   string
+	dnsSecZSK   string
 	dnsAddr     string
 	apiAddr     string
 	apiCert     string
@@ -38,6 +41,8 @@ type serverConfig struct {
 func (c *serverConfig) flags(fs *flag.FlagSet) {
 	fs.StringVar(&c.domain, "domain", "", "serves authoritative DNS for this domain (required)")
 	fs.StringVar(&c.registryDir, "registry_dir", "", "reads the registrations from this directory (required)")
+	fs.StringVar(&c.dnsSecKSK, "dnssec_ksk", "", "enables DNSSEC using this key signing key in openssh PEM format; referenced by parent DS")
+	fs.StringVar(&c.dnsSecZSK, "dnssec_zsk", "", "uses this zone signing key in openssh PEM format")
 	fs.StringVar(&c.dnsAddr, "dns_addr", ":5300", "listens for DNS at this address, to be reached by ACME CA")
 	fs.StringVar(&c.apiAddr, "api_addr", "localhost:8000", "listens for the DNS update HTTP API at this address, to be used by ACME clients to publish challenge tokens")
 	fs.StringVar(&c.apiCert, "api_tls_cert", "", "optional TLS cert for the HTTP API")
@@ -77,6 +82,30 @@ func (c *serverConfig) newServer(ctx context.Context) *server {
 		errs = append(errs, fmt.Errorf("not a directory -registry_dir: %s", s.registryDir))
 	} else {
 		s.registry = registry.Registry(s.registryDir)
+	}
+
+	if s.dnsSecKSK != "" {
+		if b, err := os.ReadFile(s.dnsSecKSK); err != nil {
+			errs = append(errs, fmt.Errorf("bad -dnssec_ksk: %w", err))
+		} else if signer, err := ssh.ParsePrivateKey(b); err != nil {
+			errs = append(errs, fmt.Errorf("error parsing -dnssec_ksk %s: %w", s.dnsSecKSK, err))
+		} else {
+			s.dnsSecKeySigner = signer
+		}
+	}
+
+	if s.dnsSecZSK != "" {
+		if b, err := os.ReadFile(s.dnsSecZSK); err != nil {
+			errs = append(errs, fmt.Errorf("bad -dnssec_zsk: %w", err))
+		} else if signer, err := ssh.ParsePrivateKey(b); err != nil {
+			errs = append(errs, fmt.Errorf("error parsing -dnssec_zsk %s: %w", s.dnsSecZSK, err))
+		} else {
+			s.dnsSecZoneSigner = signer
+		}
+	}
+
+	if s.dnsSecZoneSigner == nil {
+		s.dnsSecZoneSigner = s.dnsSecKeySigner
 	}
 
 	if addr, err := net.ResolveUDPAddr("udp", c.dnsAddr); err != nil {
@@ -122,12 +151,14 @@ type server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	domain        dnsmessage.Name
-	registry      registry.Registry
-	dnsAddr       *net.UDPAddr
-	apiAddr       *net.TCPAddr
-	allowFrom     []string
-	allowFromNets []netip.Prefix
+	domain           dnsmessage.Name
+	registry         registry.Registry
+	dnsSecKeySigner  ssh.Signer
+	dnsSecZoneSigner ssh.Signer
+	dnsAddr          *net.UDPAddr
+	apiAddr          *net.TCPAddr
+	allowFrom        []string
+	allowFromNets    []netip.Prefix
 
 	mu      sync.RWMutex
 	txtrecs map[dnsmessage.Name][][]string // each TXT record is a sequence of string fragments.
@@ -138,6 +169,7 @@ type server struct {
 
 	dnsRCode [dnsRCodeMax]atomic.Uint64
 
+	dnsReqSOA     atomic.Uint64
 	dnsReqNotTXT  atomic.Uint64
 	dnsReqNotINET atomic.Uint64
 }
@@ -349,7 +381,9 @@ func (s *server) getTXTRecs(name dnsmessage.Name) [][]string {
 	subdomain := strings.TrimSuffix(name.String(), "."+s.domain.String())
 	recs, _ := s.registry.Read(subdomain)
 	for _, rec := range recs {
-		txtrecs = append(txtrecs, rec.PreferredTXTs())
+		if txts := rec.PreferredTXTs(); len(txts) > 0 {
+			txtrecs = append(txtrecs, txts)
+		}
 	}
 	return txtrecs
 }

@@ -7,14 +7,16 @@ simplifications.
 
   * Uses [golang.org/x/dns/dnsmessage] for the DNS wire protocol,
     which is the same code used by golang's builtin DNS resolver.
+  * Uses [golang.org/x/crypto/ssh] for loading DNSSEC private key.
   * Eschews self-service registration and record persistence, which
     lets us avoid sqlite3 or external databases.  See [Usage](#usage)
     below.
 
 [golang.org/x/dns/dnsmessage]: https://pkg.go.dev/golang.org/x/net/dns/dnsmessage
+[golang.org/x/crypto/ssh]: https://pkg.go.dev/golang.org/x/crypto/ssh
 
 This eliminates supply chain attacks targeting third-party package
-maintainers.  It currently has about 560 lines.
+maintainers.  It currently has about 600 lines.
 
 ## Usage
 
