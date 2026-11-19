@@ -52,7 +52,7 @@ func (c *serverConfig) newServer(ctx context.Context) *server {
 
 	s.serverConfig = *c
 	s.ctx, s.cancel = context.WithCancel(ctx)
-	s.txts = make(map[dnsmessage.Name][]string)
+	s.txtrecs = make(map[dnsmessage.Name][][]string)
 
 	domain := c.domain
 	if domain == "" {
@@ -129,8 +129,8 @@ type server struct {
 	allowFrom     []string
 	allowFromNets []netip.Prefix
 
-	mu   sync.RWMutex
-	txts map[dnsmessage.Name][]string
+	mu      sync.RWMutex
+	txtrecs map[dnsmessage.Name][][]string // each TXT record is a sequence of string fragments.
 
 	dnsServReadError  atomic.Uint64
 	dnsRespPackError  atomic.Uint64
@@ -304,6 +304,9 @@ func (s *server) apiHandleUpdate(w http.ResponseWriter, r *http.Request) {
 		if rec.FullDomain != fulldomain {
 			log.Printf("Warning: mismatched fulldomain: got %s, want %s", rec.FullDomain, fulldomain)
 		}
+		if rec.Username == "" || rec.Password == "" {
+			continue // FIXED: empty username or password should not make the entry updatable.
+		}
 		if rec.Username != req.Username {
 			continue
 		}
@@ -312,8 +315,8 @@ func (s *server) apiHandleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("Update: %s: %s: %s TXT %q", r.RemoteAddr, rec.Username, name, req.TXT)
-		s.addTXT(name, req.TXT)
-		serveResponse(w, http.StatusOK, &apiData{TXT: req.TXT})
+		s.addTXTRec(name, req.PreferredTXTs())
+		serveResponse(w, http.StatusOK, &apiData{TXT: req.TXT, TXTs: req.TXTs})
 		return
 	}
 
@@ -322,33 +325,31 @@ func (s *server) apiHandleUpdate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) addTXT(name dnsmessage.Name, txt string) {
+func (s *server) addTXTRec(name dnsmessage.Name, txts []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	txts := s.txts[name]
-	txts = append(txts, txt)
-	if l := len(txts); l > s.keep {
-		txts = slices.Clone(txts[l-s.keep:])
+	txtrecs := s.txtrecs[name]
+	txtrecs = append(txtrecs, txts)
+	if l := len(txtrecs); l > s.keep {
+		txtrecs = slices.Clone(txtrecs[l-s.keep:])
 	}
-	s.txts[name] = txts
+	s.txtrecs[name] = txtrecs
 }
 
-func (s *server) getDynamicTXTs(name dnsmessage.Name) []string {
+func (s *server) getDynamicTXTRecs(name dnsmessage.Name) [][]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return slices.Clone(s.txts[name])
+	return slices.Clone(s.txtrecs[name])
 }
 
-func (s *server) getTXTs(name dnsmessage.Name) []string {
-	txts := s.getDynamicTXTs(name)
+func (s *server) getTXTRecs(name dnsmessage.Name) [][]string {
+	txtrecs := s.getDynamicTXTRecs(name)
 
-	subdomain := strings.TrimSuffix(name.String(), s.domain.String())
+	subdomain := strings.TrimSuffix(name.String(), "."+s.domain.String())
 	recs, _ := s.registry.Read(subdomain)
 	for _, rec := range recs {
-		if txt := rec.TXT; txt != "" {
-			txts = append(txts, rec.TXT)
-		}
+		txtrecs = append(txtrecs, rec.PreferredTXTs())
 	}
-	return txts
+	return txtrecs
 }

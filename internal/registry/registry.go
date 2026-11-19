@@ -18,7 +18,15 @@ type Record struct {
 	Password   string   `json:"password,omitempty"`
 	Subdomain  string   `json:"subdomain,omitempty"`
 	Username   string   `json:"username,omitempty"`
-	TXT        string   `json:"txt,omitempty"`
+	TXT        string   `json:"txt,omitempty"`  // for compatibility
+	TXTs       []string `json:"txts,omitempty"` // preferred, overrides TXT
+}
+
+func (r *Record) PreferredTXTs() []string {
+	if len(r.TXTs) > 0 {
+		return r.TXTs
+	}
+	return []string{r.TXT}
 }
 
 var b64urle = base64.RawURLEncoding

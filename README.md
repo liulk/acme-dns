@@ -20,8 +20,8 @@ maintainers.  It currently has about 560 lines.
 
 Install the latest version:
 
-```
-go install github.com/liulk/acme-dns@latest
+```shell-session
+$ go install github.com/liulk/acme-dns@latest
 ```
 
 The `acme-dns` server accepts the following command line flags:
@@ -65,18 +65,18 @@ LAN.  The REST API does not need to be exposed to the WAN.
 Endpoint registration must be done before attempting an ACME
 challenge.  This can be done using a `POST /register` JSON request.
 
-```
-curl --json '{}' -o reg.json http://localhost:8000/register
+```shell-session
+$ curl --json '{}' -o reg.json http://localhost:8000/register
 ```
 
 Example `reg.json` content:
 
-```
+```json
 {
     "allowfrom": [
         "192.0.2.0/24",
     ],
-    "fulldomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a.auth.acme-dns.io",
+    "fulldomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a.acme.example.com",
     "password": "htB9mR9DYgcu9bX_afHF62erXaH2TS7bg9KW3F7Z",
     "subdomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a",
     "username": "c36f50e8-4632-44f0-83fe-e070fef28a10"
@@ -102,18 +102,16 @@ Some notable differences from [acme-dns]:
 An ACME client will update the endpoint's TXT record using a `POST
 /update` JSON request.
 
-```
-ENDPOINT_USERNAME=c36f50e8-4632-44f0-83fe-e070fef28a10
-ENDPOINT_PASSWORD=htB9mR9DYgcu9bX_afHF62erXaH2TS7bg9KW3F7Z
-
-cat <<END > update.json
+```shell-session
+$ ENDPOINT_USERNAME=c36f50e8-4632-44f0-83fe-e070fef28a10
+$ ENDPOINT_PASSWORD=htB9mR9DYgcu9bX_afHF62erXaH2TS7bg9KW3F7Z
+$ cat <<END > update.json
 {
     "subdomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a",
     "txt": "___validation_token_received_from_the_ca___"
 }
 END
-
-curl --json @update.json \
+$ curl --json @update.json \
     -H "X-Api-User: ${ENDPOINT_USERNAME}" \
     -H "X-Api-Key: ${ENDPOINT_PASSWORD}" \
     http://localhost:8000/update
@@ -121,22 +119,58 @@ curl --json @update.json \
 
 The TXT record is ephemeral and not preserved across server restarts.
 
-Alternatively, one or more registration JSON can be provided to the
-[acme-poly] client.  For requesting a certificate with multiple
-Subject Alternative Names (SAN), each subject name must have its own
-endpoint registration.
+For requesting a certificate with multiple Subject Alternative Names
+(SAN), each subject name must have its own endpoint registration.
+
+## Extension: request credentials in JSON body
+
+As an extension to [acme-dns], the username and password can go into
+the request JSON as well.  You can make a copy of `reg.json`, add the
+desired `"txt"` field, and use it to update the record.
+
+```shell-session
+$ cat <<END > update.json
+{
+    "subdomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a",
+    "username": "c36f50e8-4632-44f0-83fe-e070fef28a10",
+    "password": "htB9mR9DYgcu9bX_afHF62erXaH2TS7bg9KW3F7Z",
+    "txt": "___validation_token_received_from_the_ca___"
+}
+END
+$ curl --json @update.json http://localhost:8000/update
+```
+
+## Extention: DNS-PERSIST-01
+
+This implementation further supports multiple TXT string fragments per
+record, which is required by DNS-PERSIST-01.  The fragments go in to
+the `"txts"` field and overrides `"txt"`.
+
+```shell-session
+$ cat <<END > update.json
+{
+    "subdomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a",
+    "username": "c36f50e8-4632-44f0-83fe-e070fef28a10",
+    "password": "htB9mR9DYgcu9bX_afHF62erXaH2TS7bg9KW3F7Z",
+    "txts": ["letsencrypt", " accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/1234567890"]
+}
+END
+$ curl --json @update.json http://localhost:8000/update
+```
+
+The [acme-poly] client supports DNS-PERSIST-01.
 
 [acme-poly]: https://github.com/liulk/acme-poly
 
-## Non-API Registry Update
+## Extension: Non-API Registry Update
 
 ACME client running on the same host as the server could write the TXT
-record to the registry directly.  These records are not updatable over
-API.
+record to the registry directly.  These records can still be updated
+but the provided TXT will always be returned.
 
 Example JSON:
 
-```
+```json
 {
     "subdomain": "8e5700ea-a4bf-41c7-8a77-e990661dcc6a",
     "txt": "___validation_token_received_from_the_ca___"
@@ -166,16 +200,16 @@ For the wildcard certificate `*.example.com`, instead of serving
 the domain owner would delegate a subdomain nameserver to the ACME DNS
 server (serving UDP port 53 at e.g. 203.0.113.1) with an NS record:
 
-```
-acme.example.com IN NS ns.acme.example.com.
-ns.acme.example.com. IN A 203.0.113.1
+```dns-zone
+acme.example.com.    IN NS ns.acme.example.com.
+ns.acme.example.com. IN A  203.0.113.1
 ```
 
 And redirect the ACME challenge record to a name record registered
 with the ACME DNS server in advance (see [Usage](#usage) above),
 e.g. `8e5700ea-a4bf-41c7-8a77-e990661dcc6a.acme.example.com`.
 
-```
+```dns-zone
 _acme-challenge IN CNAME 8e5700ea-a4bf-41c7-8a77-e990661dcc6a.acme.example.com.
 ```
 
@@ -183,7 +217,7 @@ This redirection is a one-time setup.  When an ACME script like
 certbot renews the certificate, it would instead publish the challenge
 to the target of the CNAME.
 
-```
+```dns-zone
 8e5700ea-a4bf-41c7-8a77-e990661dcc6a.acme.example.com. IN TXT ___validation_token_received_from_the_ca___
 ```
 

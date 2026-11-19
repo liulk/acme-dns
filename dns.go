@@ -36,7 +36,9 @@ func (s *server) dnsHandle(conn *net.UDPConn, clientAddr *net.UDPAddr, packet []
 		resp.RecursionDesired = req.RecursionDesired
 		resp.RecursionAvailable = false
 
-		s.dnsRCode[resp.Header.RCode].Add(1)
+		if rcode := resp.RCode; int(rcode) < len(s.dnsRCode) {
+			s.dnsRCode[rcode].Add(1)
+		}
 
 		packed, err := resp.Pack()
 		if err != nil {
@@ -66,8 +68,8 @@ func (s *server) dnsHandle(conn *net.UDPConn, clientAddr *net.UDPAddr, packet []
 	resp.Questions = req.Questions
 	question := req.Questions[0]
 
-	txts := s.getTXTs(question.Name)
-	if txts == nil {
+	txtrecs := s.getTXTRecs(question.Name)
+	if txtrecs == nil {
 		resp.RCode = dnsmessage.RCodeNameError
 		return
 	}
@@ -83,7 +85,7 @@ func (s *server) dnsHandle(conn *net.UDPConn, clientAddr *net.UDPAddr, packet []
 		return
 	}
 
-	for _, txt := range txts {
+	for _, txts := range txtrecs {
 		resp.Answers = append(resp.Answers, dnsmessage.Resource{
 			Header: dnsmessage.ResourceHeader{
 				Name:  question.Name,
@@ -92,9 +94,7 @@ func (s *server) dnsHandle(conn *net.UDPConn, clientAddr *net.UDPAddr, packet []
 				TTL:   30,
 			},
 			Body: &dnsmessage.TXTResource{
-				// A single TXT record is sometimes broken down to slices.
-				// Not applicable to ACME challenges.
-				TXT: []string{txt},
+				TXT: txts, // acme DNS-PERSIST-01 needs TXT as fragments.
 			},
 		})
 	}
