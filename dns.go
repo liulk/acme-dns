@@ -112,10 +112,13 @@ func (s *server) dnsHandle(conn *net.UDPConn, clientAddr *net.UDPAddr, packet []
 	resp.Questions = req.Questions
 	question := req.Questions[0]
 
-	if question.Type == dnsmessage.TypeSOA && question.Name == s.domain {
-		resp.Answers = resp.Authorities
-		resp.Authorities = nil
-		s.dnsReqSOA.Add(1)
+	if question.Name == s.domain {
+		resp.RCode = dnsmessage.RCodeSuccess
+		if question.Type == dnsmessage.TypeSOA {
+			resp.Answers = resp.Authorities
+			resp.Authorities = nil
+			s.dnsReqSOA.Add(1)
+		}
 		return
 	}
 
