@@ -27,6 +27,7 @@ import (
 
 type serverConfig struct {
 	domain      string
+	mname       string
 	registryDir string
 	dnsSecKSK   string
 	dnsSecZSK   string
@@ -40,6 +41,7 @@ type serverConfig struct {
 
 func (c *serverConfig) flags(fs *flag.FlagSet) {
 	fs.StringVar(&c.domain, "domain", "", "serves authoritative DNS for this domain (required)")
+	fs.StringVar(&c.mname, "mname", "", "sets the SOA MNAME; default to -domain")
 	fs.StringVar(&c.registryDir, "registry_dir", "", "reads the registrations from this directory (required)")
 	fs.StringVar(&c.dnsSecKSK, "dnssec_ksk", "", "enables DNSSEC using this key signing key in openssh PEM format; referenced by parent DS")
 	fs.StringVar(&c.dnsSecZSK, "dnssec_zsk", "", "uses this zone signing key in openssh PEM format")
@@ -51,6 +53,13 @@ func (c *serverConfig) flags(fs *flag.FlagSet) {
 	fs.IntVar(&c.keep, "keep", 2, "keeps the most recent number of TXT values updated through the API")
 }
 
+func newName(name string) (dnsmessage.Name, error) {
+	if !strings.HasSuffix(name, ".") {
+		name += "."
+	}
+	return dnsmessage.NewName(name)
+}
+
 func (c *serverConfig) newServer(ctx context.Context) *server {
 	var errs []error
 	var s server
@@ -59,19 +68,22 @@ func (c *serverConfig) newServer(ctx context.Context) *server {
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.txtrecs = make(map[dnsmessage.Name][][]string)
 
-	domain := c.domain
-	if domain == "" {
+	if c.domain == "" {
 		errs = append(errs, errors.New("missing required -domain"))
 	} else {
-		if !strings.HasSuffix(domain, ".") {
-			domain += "."
-		}
-		name, err := dnsmessage.NewName(domain)
-		if err != nil {
+		if name, err := newName(c.domain); err != nil {
 			errs = append(errs, err)
 		} else {
 			s.domain = name
 		}
+	}
+
+	if c.mname == "" {
+		s.mname = s.domain
+	} else if name, err := newName(c.mname); err != nil {
+		errs = append(errs, err)
+	} else {
+		s.mname = name
 	}
 
 	if s.registryDir == "" {
@@ -152,6 +164,7 @@ type server struct {
 	cancel context.CancelFunc
 
 	domain           dnsmessage.Name
+	mname            dnsmessage.Name
 	registry         registry.Registry
 	dnsSecKeySigner  ssh.Signer
 	dnsSecZoneSigner ssh.Signer

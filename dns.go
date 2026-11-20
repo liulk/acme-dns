@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"strings"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -77,12 +78,12 @@ func (s *server) dnsHandle(conn *net.UDPConn, clientAddr *net.UDPAddr, packet []
 			TTL:   30,
 		},
 		Body: &dnsmessage.SOAResource{
-			NS:      s.domain,
+			NS:      s.mname,
 			MBox:    s.domain,
 			Serial:  uint32(time.Now().Unix()),
 			Refresh: 30,
 			Retry:   30,
-			Expire:  3600000,
+			Expire:  86400,
 			MinTTL:  1,
 		},
 	}}
@@ -111,18 +112,26 @@ func (s *server) dnsHandle(conn *net.UDPConn, clientAddr *net.UDPAddr, packet []
 	resp.RCode = dnsmessage.RCodeNameError
 	resp.Questions = req.Questions
 	question := req.Questions[0]
+	// DNS is case insensitive; Google public DNS actually mangles upper and lower case.
+	name := dnsmessage.MustNewName(strings.ToLower(question.Name.String()))
 
-	if question.Name == s.domain {
+	if name == s.domain {
 		resp.RCode = dnsmessage.RCodeSuccess
-		if question.Type == dnsmessage.TypeSOA {
+		switch question.Type {
+		case dnsmessage.TypeSOA:
 			resp.Answers = resp.Authorities
 			resp.Authorities = nil
 			s.dnsReqSOA.Add(1)
+		case dnsmessage.TypeNS:
+			resp.Answers = []dnsmessage.Resource{{
+				Header: resourceHeader(question),
+				Body:   &dnsmessage.NSResource{NS: s.mname},
+			}}
 		}
 		return
 	}
 
-	txtrecs := s.getTXTRecs(question.Name)
+	txtrecs := s.getTXTRecs(name)
 	if txtrecs == nil {
 		return
 	}
@@ -139,12 +148,7 @@ func (s *server) dnsHandle(conn *net.UDPConn, clientAddr *net.UDPAddr, packet []
 
 	for _, txts := range txtrecs {
 		resp.Answers = append(resp.Answers, dnsmessage.Resource{
-			Header: dnsmessage.ResourceHeader{
-				Name:  question.Name,
-				Type:  question.Type,
-				Class: question.Class,
-				TTL:   30,
-			},
+			Header: resourceHeader(question),
 			Body: &dnsmessage.TXTResource{
 				TXT: txts, // acme DNS-PERSIST-01 needs TXT as fragments.
 			},
@@ -152,4 +156,8 @@ func (s *server) dnsHandle(conn *net.UDPConn, clientAddr *net.UDPAddr, packet []
 	}
 
 	// Let defer tally the RCode and write the resp back to client.
+}
+
+func resourceHeader(q dnsmessage.Question) dnsmessage.ResourceHeader {
+	return dnsmessage.ResourceHeader{Name: q.Name, Type: q.Type, Class: q.Class, TTL: 30}
 }
